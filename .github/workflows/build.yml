@@ -48,6 +48,9 @@ jobs:
       - name: Build
         run: |
           cd $HOME/repo/plugin_src/menu_clone
+          # libc++ headers (<string>, <vector> ...) live in the toolchain; the template Makefile does not point to them
+          export CPLUS_INCLUDE_PATH="$OO_PS4_TOOLCHAIN/include/c++/v1"
+          ls "$OO_PS4_TOOLCHAIN/include/c++/v1" | head -5
           make
 
       - name: Collect result
