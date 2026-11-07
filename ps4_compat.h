@@ -2,6 +2,7 @@
 // Self-contained declarations of the PS4 system calls we use. They are bound to the REAL symbol names with asm labels,
 // so we do not depend on header type names (ScePthread vs OrbisPthread ...) of any SDK version.
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -20,6 +21,9 @@ namespace ps4 {
     int  KOpen(const char* path, int flags, int mode)                                                    __asm__("sceKernelOpen");
     int  KClose(int fd)                                                                                  __asm__("sceKernelClose");
     int  KGetdents(int fd, char* buf, int nbytes)                                                        __asm__("sceKernelGetdents");
+
+    // Append one line to /data/16menu/menu_clone.log (proof that the code ran, even if nothing is drawn)
+    inline void Log(const char* line){ FILE* f=fopen("/data/16menu/menu_clone.log","a"); if(f){ fputs(line,f); fputs("\n",f); fclose(f);} }
 
     // case-insensitive compare (no libc dependency)
     inline int StrCaseCmp(const char* a, const char* b){

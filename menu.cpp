@@ -1,6 +1,7 @@
 #include "menu.h"
 #include "natives.h"
 #include <cstdio>
+#include "ps4_compat.h"
 
 // ---------- primitives (same native sequences the original uses) ----------
 void Menu::Rect(float x,float y,float w,float h,int r,int g,int b,int a){
@@ -40,6 +41,9 @@ void Menu::Init(){
             [](const char* m){ g_m->Notify(m); }};
     scripts.Scan(); addons.Scan(); music.Init();
     BuildPages();
+    ps4::Log("Menu::Init done");
+    Notify("menu_clone loaded - press L1 + Circle");
+    msgFrames=420;
 }
 void Menu::Shutdown(){ scripts.UnloadAll(); music.Shutdown(); }
 
@@ -93,7 +97,7 @@ void Menu::BuildMusic(){
 // Default combo in my version: LB + CANCEL held opens/closes. Replace with the combo from your settings.
 void Menu::Input(){
     static bool prevOpen=false; bool lb=Call(NAT::PAD_B,0,205)!=0, cancel=Call(NAT::PAD_A,0,202)!=0;
-    if(lb&&cancel&&!prevOpen){ open=!open; prevOpen=true; } if(!(lb&&cancel)) prevOpen=false;
+    if(lb&&cancel&&!prevOpen){ open=!open; prevOpen=true; ps4::Log(open?"menu opened":"menu closed"); Notify(open?"Menu OPENED - menu_clone is working":"Menu closed"); msgFrames=300; } if(!(lb&&cancel)) prevOpen=false;
     // Music hotkeys (work even when the menu is closed): LB + DPad  => Right=next, Left=prev, Down=play/pause
     { bool lbHeld=Call(NAT::PAD_B,0,205)!=0;
       if(lbHeld&&!open){ if(Call(NAT::PAD_A,0,190)) music.Next(); else if(Call(NAT::PAD_A,0,189)) music.Prev(); else if(Call(NAT::PAD_A,0,187)) music.TogglePause(); } }
@@ -170,8 +174,11 @@ void Menu::DrawWidget(){
     Text(t,x-w/2+0.008f,y-0.002f,0.26f,255,255,255,220,0);
 }
 void Menu::Tick(){
+    static bool firstTick=true; if(firstTick){ firstTick=false; ps4::Log("first Tick: the per-frame call is working"); }
     if(pendingRebuild){ if(pendingRebuild==1){ scripts.Scan(); BuildScripts(); } else if(pendingRebuild==2){ addons.Scan(); BuildAddons(); } else { music.Scan(); BuildMusic(); }
         pendingRebuild=0; sel=0; scroll=0; }
     Input(); if(open) Draw(); DrawWidget(); scripts.Tick();
-    if(msgFrames>0){ msgFrames--; Text(msg,0.5f,0.92f,0.34f,255,255,255,255,0,0); }
+    if(msgFrames>0){ msgFrames--;                                   // message box, bottom centre, visible with the menu open or closed
+        Rect(0.5f,0.915f,0.34f,0.045f,6,4,20,200);
+        Text(msg,0.5f,0.915f-0.014f,0.36f,255,255,255,255,0,0); }
 }

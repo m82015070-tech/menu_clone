@@ -4,6 +4,8 @@
 #include <cstring>
 #include <algorithm>
 #include "ps4_compat.h"
+// dr_mp3 asserts would need __assert_fail from a C library we do not link: turn them off.
+#define DRMP3_ASSERT(expression) ((void)0)
 #define DR_MP3_IMPLEMENTATION
 #include "dr_mp3.h"
 

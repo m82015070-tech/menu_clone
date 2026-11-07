@@ -35,6 +35,10 @@ void  operator delete[](void* p) noexcept { free(p); }
 void  operator delete(void* p, size_t) noexcept { free(p); }
 void  operator delete[](void* p, size_t) noexcept { free(p); }
 
+// Symbols that the MP3 decoder (dr_mp3, built against a normal libc) expects but Sony libc does not export.
+extern "C" int* __errno_location(void){ static int e=0; return &e; }
+extern "C" void __assert_fail(const char*, const char*, unsigned, const char*){ __builtin_trap(); }
+
 // Created on first use: static constructors are not guaranteed to run inside a PRX.
 static Menu* g_menuPtr=nullptr;
 static Menu& M(){ if(!g_menuPtr) g_menuPtr=new Menu(); return *g_menuPtr; }
@@ -58,7 +62,7 @@ static volatile bool g_run=false; static void* g_tt=nullptr;
 static void* TickThread(void*){ while(g_run){ OnScriptTick(); ps4::Usleep(16000); } return nullptr; }
 
 extern "C" int attr_module_hidden module_start(long long, const void*){
-    final_printf("[menu_clone] loaded\n");
+    final_printf("[menu_clone] loaded\n"); ps4::Log("module_start: plugin loaded");
     if(FILE* f=fopen("/data/16menu/config/thread_tick.txt","r")){ fclose(f); g_run=true; ps4::ThreadCreate(&g_tt,nullptr,TickThread,nullptr,"menu_tick"); final_printf("[menu_clone] thread tick ON\n"); }
     return 0; }
 extern "C" int attr_module_hidden module_stop(long long, const void*){ g_run=false; if(g_menuPtr) g_menuPtr->Shutdown(); return 0; }
