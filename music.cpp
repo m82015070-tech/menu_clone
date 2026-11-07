@@ -1,10 +1,8 @@
 #include "music.h"
-#include <dirent.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
-#include <strings.h>
 #include "ps4_compat.h"
 #define DR_MP3_IMPLEMENTATION
 #include "dr_mp3.h"
@@ -14,10 +12,9 @@ static MusicPlayer* g_self=nullptr; static void* g_th=nullptr;
 static void* ThreadEntry(void*){ if(g_self) g_self->ThreadMain(); return nullptr; }
 
 void MusicPlayer::Scan(){
-    tracks.clear(); DIR* d=opendir(kDir); if(!d) return;
-    while(dirent* e=readdir(d)){ std::string n=e->d_name; if(n.size()<5||strcasecmp(n.c_str()+n.size()-4,".mp3")) continue;
-        Track t; t.title=n.substr(0,n.size()-4); t.path=std::string(kDir)+"/"+n; tracks.push_back(t); }
-    closedir(d); std::sort(tracks.begin(),tracks.end(),[](const Track&a,const Track&b){return a.title<b.title;});
+    tracks.clear(); std::vector<std::string> names; if(!ps4::ListDir(kDir,names)) return;
+    for(auto& n:names){ if(!ps4::EndsWithI(n,".mp3")) continue; Track t; t.title=n.substr(0,n.size()-4); t.path=std::string(kDir)+"/"+n; tracks.push_back(t); }
+    std::sort(tracks.begin(),tracks.end(),[](const Track&a,const Track&b){return a.title<b.title;});
 }
 void MusicPlayer::Init(){ g_self=this; Scan(); quit=false; ps4::ThreadCreate(&g_th,nullptr,ThreadEntry,nullptr,"menu_music"); }
 void MusicPlayer::Shutdown(){ quit=true; ps4::ThreadJoin(g_th,nullptr); }

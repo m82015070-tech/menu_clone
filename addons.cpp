@@ -1,6 +1,5 @@
 #include "addons.h"
-#include <dirent.h>
-#include <strings.h>
+#include "ps4_compat.h"
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -16,12 +15,9 @@ static bool IsOn(const std::string& n){
 }
 void AddonManager::Scan(){
     rpfs.clear(); dlcPacks.clear();
-    if(DIR* d=opendir(kDir)){
-        while(dirent* e=readdir(d)){ std::string n=e->d_name; if(n.size()<5||strcasecmp(n.c_str()+n.size()-4,".rpf")) continue;
-            Addon a; a.name=n; a.path=std::string(kDir)+"/"+n; a.on=IsOn(n); rpfs.push_back(a); }
-        closedir(d);
-        std::sort(rpfs.begin(),rpfs.end(),[](const Addon&a,const Addon&b){return a.name<b.name;});
-    }
+    { std::vector<std::string> names; ps4::ListDir(kDir,names);
+      for(auto& n:names){ if(!ps4::EndsWithI(n,".rpf")) continue; Addon a; a.name=n; a.path=std::string(kDir)+"/"+n; a.on=IsOn(n); rpfs.push_back(a); }
+      std::sort(rpfs.begin(),rpfs.end(),[](const Addon&a,const Addon&b){return a.name<b.name;}); }
     // dlclist.xml: collect <Item>dlcpacks:/NAME/</Item>
     if(FILE* f=fopen(kDlc,"r")){ char l[512];
         while(fgets(l,sizeof l,f)){ char* p=strstr(l,"dlcpacks:/"); if(!p) continue; p+=10; char* q=strchr(p,'/'); if(q){ *q=0; dlcPacks.push_back(p);} }
@@ -31,6 +27,6 @@ void AddonManager::SaveState(){ FILE* f=fopen(kState,"w"); if(!f) return; for(au
 const char* AddonManager::Redirect(const char* gp){
     if(!gp) return gp; size_t n=strlen(gp);
     for(auto& a:rpfs){ if(!a.on) continue; size_t m=a.name.size();
-        if(n>=m && strcasecmp(gp+n-m,a.name.c_str())==0 && (n==m||gp[n-m-1]=='/')){ snprintf(g_tmp,sizeof g_tmp,"%s",a.path.c_str()); return g_tmp; } }
+        if(n>=m && ps4::StrCaseCmp(gp+n-m,a.name.c_str())==0 && (n==m||gp[n-m-1]=='/')){ snprintf(g_tmp,sizeof g_tmp,"%s",a.path.c_str()); return g_tmp; } }
     return gp;
 }

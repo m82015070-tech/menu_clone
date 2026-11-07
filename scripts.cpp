@@ -1,21 +1,17 @@
 #include "scripts.h"
-#include <dirent.h>
 #include <cstring>
 #include <algorithm>
-#include <strings.h>
 #include "ps4_compat.h"
 static const char* kDir="/data/16menu/scripts";
 void ScriptManager::Scan(){
     std::vector<ScriptEntry> old=list; list.clear();
-    DIR* d=opendir(kDir); if(!d) return;
-    while(dirent* e=readdir(d)){
-        std::string n=e->d_name; size_t p=n.rfind('.'); if(p==std::string::npos) continue;
-        std::string ext=n.substr(p); if(ext!=".prx"&&ext!=".sprx") continue;
-        ScriptEntry s; s.name=n.substr(0,p); s.path=std::string(kDir)+"/"+n;
+    std::vector<std::string> names; if(!ps4::ListDir(kDir,names)) return;
+    for(auto& n:names){
+        if(!ps4::EndsWithI(n,".prx") && !ps4::EndsWithI(n,".sprx")) continue;
+        size_t p=n.rfind('.'); ScriptEntry s; s.name=n.substr(0,p); s.path=std::string(kDir)+"/"+n;
         for(auto& o:old) if(o.path==s.path){ s=o; break; }   // keep loaded state across rescans
         list.push_back(s);
     }
-    closedir(d);
     std::sort(list.begin(),list.end(),[](const ScriptEntry&a,const ScriptEntry&b){return a.name<b.name;});
 }
 bool ScriptManager::Load(int i,const HostApi* host){
