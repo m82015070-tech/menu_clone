@@ -24,6 +24,7 @@ jobs:
           chmod -R +x "$TC/bin" || true
           echo "OO_PS4_TOOLCHAIN=$TC" >> $GITHUB_ENV
           echo "toolchain at: $TC"
+          ls "$TC/lib" | head -50
 
       - name: Build GoldHEN Plugins SDK
         run: |
@@ -34,6 +35,24 @@ jobs:
       - name: Get official plugin repo (for the real template + Makefile)
         run: git clone --depth 1 --recurse-submodules https://github.com/GoldHEN/GoldHEN_Plugins_Repository $HOME/repo
 
+      - name: Compiler and linker helpers
+        run: |
+          # clang++ wrapper: our C++ must not need the C++ runtime library (the plugin links Sony libc only)
+          mkdir -p $HOME/wrap
+          REAL_CLANGPP=$(command -v clang++)
+          REAL_LLD=$(command -v ld.lld)
+          echo '#!/bin/bash' > $HOME/wrap/clang++
+          echo "exec \"$REAL_CLANGPP\" \"\$@\" -fno-exceptions -fno-rtti -D_LIBCPP_DISABLE_EXTERN_TEMPLATE" >> $HOME/wrap/clang++
+          # ld.lld wrapper: add the audio stub library when the toolchain has it
+          EXTRA=""
+          if [ -e "$OO_PS4_TOOLCHAIN/lib/libSceAudioOut.so" ]; then EXTRA="-lSceAudioOut"; else echo "WARNING: libSceAudioOut.so not found in toolchain"; fi
+          echo '#!/bin/bash' > $HOME/wrap/ld.lld
+          echo "exec \"$REAL_LLD\" \"\$@\" $EXTRA" >> $HOME/wrap/ld.lld
+          chmod +x $HOME/wrap/clang++ $HOME/wrap/ld.lld
+          echo "$HOME/wrap" >> $GITHUB_PATH
+          echo "--- clang++ wrapper"; cat $HOME/wrap/clang++
+          echo "--- ld.lld wrapper"; cat $HOME/wrap/ld.lld
+
       - name: Put our code into the template
         run: |
           D=$HOME/repo/plugin_src/menu_clone
@@ -42,27 +61,28 @@ jobs:
           cp $GITHUB_WORKSPACE/*.cpp $GITHUB_WORKSPACE/*.h $D/source/
           curl -L -o $D/source/dr_mp3.h https://raw.githubusercontent.com/mackron/dr_libs/master/dr_mp3.h
           sed -i 's/plugin_template/menu_clone/g' $D/Makefile
-          # extra libraries our C++ code needs (appended at the end so they always win; recipes expand variables late)
-          echo "" >> $D/Makefile
-          echo "LIBS += -lc++ -lSceAudioOut -lSceUserService" >> $D/Makefile
-          echo "LDLIBS += -lc++ -lSceAudioOut -lSceUserService" >> $D/Makefile
+          mkdir -p $HOME/repo/bin/plugins/elf_final $HOME/repo/bin/plugins/prx_final
           echo "=== Makefile used ==="; cat $D/Makefile
 
       - name: Build
         run: |
           cd $HOME/repo/plugin_src/menu_clone
-          # libc++ headers (<string>, <vector> ...) live in the toolchain; the template Makefile does not point to them
+          # libc++ headers (string, vector ...) live in the toolchain; the template Makefile does not point to them
           export CPLUS_INCLUDE_PATH="$OO_PS4_TOOLCHAIN/include/c++/v1"
-          ls "$OO_PS4_TOOLCHAIN/include/c++/v1" | head -5
-          make -k 2>&1 | tee ../../../build.log; test ${PIPESTATUS[0]} -eq 0
+          make -k 2>&1 | tee $HOME/build.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Collect result
+        if: always()
         run: |
           mkdir -p $GITHUB_WORKSPACE/out
-          find $HOME/repo -name 'menu_clone*.prx' -exec cp {} $GITHUB_WORKSPACE/out/ \;
-          ls -la $GITHUB_WORKSPACE/out
+          find $HOME/repo/bin -type f -exec cp {} $GITHUB_WORKSPACE/out/ \;
+          cd $GITHUB_WORKSPACE/out
+          for f in *; do [ -f "$f" ] || continue; case "$f" in *.prx|*.elf|*.sprx) ;; *) mv "$f" "$f.prx" ;; esac; done
+          ls -la
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: menu_clone_prx
           path: out/*
+          if-no-files-found: warn
