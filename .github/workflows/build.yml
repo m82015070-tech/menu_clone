@@ -1,0 +1,62 @@
+name: build-menu-clone
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm make git curl unzip
+
+      - name: Get OpenOrbis toolchain
+        run: |
+          mkdir -p $HOME/oo && cd $HOME/oo
+          gh release download --repo OpenOrbis/OpenOrbis-PS4-Toolchain --pattern '*.tar.gz' || gh release download --repo OpenOrbis/OpenOrbis-PS4-Toolchain --pattern '*.zip'
+          ls -la
+          for f in *.tar.gz; do [ -e "$f" ] && tar xzf "$f"; done
+          for f in *.zip; do [ -e "$f" ] && unzip -q "$f"; done
+          TC=$(find $HOME/oo -type d -name PS4Toolchain | head -1)
+          chmod -R +x "$TC/bin" || true
+          echo "OO_PS4_TOOLCHAIN=$TC" >> $GITHUB_ENV
+          echo "toolchain at: $TC"
+
+      - name: Build GoldHEN Plugins SDK
+        run: |
+          git clone --depth 1 https://github.com/GoldHEN/GoldHEN_Plugins_SDK $HOME/sdk
+          cd $HOME/sdk && make
+          echo "GOLDHEN_SDK=$HOME/sdk" >> $GITHUB_ENV
+
+      - name: Get official plugin repo (for the real template + Makefile)
+        run: git clone --depth 1 --recurse-submodules https://github.com/GoldHEN/GoldHEN_Plugins_Repository $HOME/repo
+
+      - name: Put our code into the template
+        run: |
+          D=$HOME/repo/plugin_src/menu_clone
+          cp -r $HOME/repo/plugin_src/plugin_template $D
+          rm -rf $D/source && mkdir -p $D/source
+          cp $GITHUB_WORKSPACE/*.cpp $GITHUB_WORKSPACE/*.h $D/source/
+          curl -L -o $D/source/dr_mp3.h https://raw.githubusercontent.com/mackron/dr_libs/master/dr_mp3.h
+          sed -i 's/plugin_template/menu_clone/g' $D/Makefile
+          grep -q SceAudioOut $D/Makefile || sed -i '0,/^LIBS.*$/s//& -lSceAudioOut -lSceUserService/' $D/Makefile
+          echo "=== Makefile used ==="; cat $D/Makefile
+
+      - name: Build
+        run: |
+          cd $HOME/repo/plugin_src/menu_clone
+          make
+
+      - name: Collect result
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/out
+          find $HOME/repo -name 'menu_clone*.prx' -exec cp {} $GITHUB_WORKSPACE/out/ \;
+          ls -la $GITHUB_WORKSPACE/out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menu_clone_prx
+          path: out/*
