@@ -1,5 +1,7 @@
 #include "addons.h"
 #include <dirent.h>
+#include <strings.h>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
