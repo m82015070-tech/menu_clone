@@ -44,8 +44,9 @@ jobs:
           echo '#!/bin/bash' > $HOME/wrap/clang++
           echo "exec \"$REAL_CLANGPP\" \"\$@\" -fno-exceptions -fno-rtti -D_LIBCPP_DISABLE_EXTERN_TEMPLATE" >> $HOME/wrap/clang++
           # ld.lld wrapper: add the audio stub library when the toolchain has it
-          EXTRA=""
-          if [ -e "$OO_PS4_TOOLCHAIN/lib/libSceAudioOut.so" ]; then EXTRA="-lSceAudioOut"; else echo "WARNING: libSceAudioOut.so not found in toolchain"; fi
+          # keep our own operator new/delete and helper symbols LOCAL (not exported to the game process)
+          echo '{ global: *; local: _Znwm; _Znam; _ZdlPv; _ZdaPv; _ZdlPvm; _ZdaPvm; __errno_location; __assert_fail; };' > $HOME/wrap/vs.txt
+          EXTRA="--version-script=$HOME/wrap/vs.txt"
           echo '#!/bin/bash' > $HOME/wrap/ld.lld
           echo "exec \"$REAL_LLD\" \"\$@\" $EXTRA" >> $HOME/wrap/ld.lld
           chmod +x $HOME/wrap/clang++ $HOME/wrap/ld.lld
