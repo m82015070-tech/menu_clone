@@ -16,6 +16,7 @@ namespace ps4 {
     int  Dlsym(int handle, const char* name, void** addr)                                                __asm__("sceKernelDlsym");
     // Audio is resolved when the music thread starts (NOT at plugin load): the plugin must not depend on libSceAudioOut at load time.
     struct AudioApi { int(*init)(void)=nullptr; int(*open)(int,int,int,unsigned,unsigned,unsigned)=nullptr; int(*output)(int,const void*)=nullptr; int(*close)(int)=nullptr; };
+    unsigned long long TimeUs(void) __asm__("sceKernelGetProcessTime");   // microseconds since process start
     int  KOpen(const char* path, int flags, int mode)                                                    __asm__("sceKernelOpen");
     int  KClose(int fd)                                                                                  __asm__("sceKernelClose");
     int  KGetdents(int fd, char* buf, int nbytes)                                                        __asm__("sceKernelGetdents");

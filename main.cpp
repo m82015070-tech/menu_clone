@@ -2,6 +2,12 @@
 #if __has_include(<plugin_common.h>)
 #include <plugin_common.h>
 #endif
+#if __has_include(<Detour.h>)
+#include <Detour.h>
+#define HAVE_DETOUR 1
+#else
+#define HAVE_DETOUR 0
+#endif
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -9,6 +15,7 @@
 #include "ps4_compat.h"
 #include "menu.h"
 #include "natives.h"
+#include "notify.h"
 
 #ifndef attr_public
 #define attr_public __attribute__((visibility("default")))
@@ -55,22 +62,63 @@ const char* RedirectPath(const char* path){
     return M().addons.Redirect(path);
 }
 
-// --- 2) Per-frame callback: call from your game-thread hook (the same place your working menu runs).
+// --- 2) Per-frame callback.
 void OnScriptTick(){ static bool init=false; if(!init){ M().Init(); init=true; } M().Tick(); }
 
-// --- 3) Boot thread. module_start itself does NOTHING risky: it only starts this thread.
-//     The thread waits 20 s (game finishes booting), writes a life sign to /data/16menu/menu_clone.log,
-//     and ONLY IF /data/16menu/config/thread_tick.txt exists starts the experimental tick loop
-//     (natives from a foreign thread may flicker or crash the game: use only to test).
+// --- 3) HOOK MODE (uses the real GoldHEN SDK Detour). If /data/16menu/config/hook_tick.txt exists, we put a detour on
+//     one GAME NATIVE HANDLER that the game scripts call every frame. Our tick then runs INSIDE the game's own script
+//     thread (no flicker, correct context). The file may contain the native name (default DRAW_RECT; others: PAD_A,
+//     PAD_B, PAD_C, REQUEST_TXD, HAS_TXD, SET_TEXT_FONT, SET_TEXT_SCALE, SET_TEXT_COLOUR, BEGIN_TEXT, END_TEXT, DRAW_SPRITE).
+#if HAVE_DETOUR
+typedef void (*NativeFn)(void*);
+static Detour g_det;
+static volatile int g_inHook=0, g_hookFired=0;
+static unsigned long long g_lastUs=0;
+static void FrameNativeHook(void* ctx){
+    Detour_Stub(&g_det, NativeFn, ctx);                  // run the real native first
+    if(g_inHook) return;                                  // our own native calls go through here too: do not recurse
+    if(!g_hookFired){ g_hookFired=1; ps4::Log("hook: first call from the game - hook is alive"); }
+    unsigned long long now=ps4::TimeUs();
+    if(now-g_lastUs<8000ull) return;                      // at most ~120 ticks/s, the game calls natives many times per frame
+    g_lastUs=now; g_inHook=1; OnScriptTick(); g_inHook=0;
+}
+static bool InstallFrameHook(const char* name){
+    NativeOff off{0,0};
+    if(!NativeByName(name,off)){ ps4::Log("hook: unknown native name in hook_tick.txt"); return false; }
+    uint64_t addr=NativeAddr(off);
+    char b[128]; snprintf(b,sizeof b,"hook: installing on %s at 0x%llX",name,(unsigned long long)addr); ps4::Log(b);
+    Detour_Construct(&g_det, DetourMode_x64);
+    void* stub=Detour_DetourFunction(&g_det,(uint64_t)addr,(void*)FrameNativeHook);
+    ps4::Log(stub ? "hook: installed (waiting for the game to call it)" : "hook: Detour_DetourFunction returned NULL");
+    return stub!=nullptr;
+}
+#endif
+
+// --- 4) Boot thread. module_start itself does NOTHING risky: it only starts this thread.
+//     After 20 s (game finished booting): life sign in the log + a PS4 popup, then the chosen tick mode:
+//       hook_tick.txt   -> detour on a game native (preferred)
+//       thread_tick.txt -> tick from this thread (works but may flicker)
+//       neither         -> idle
 static volatile bool g_run=false; static void* g_tt=nullptr;
 static void* BootThread(void*){
     ps4::Usleep(20u*1000u*1000u);
     if(!g_run) return nullptr;
     ps4::Log("boot thread: 20 s after start, plugin is alive");
+#if HAVE_DETOUR
+    if(FILE* f=fopen("/data/16menu/config/hook_tick.txt","r")){
+        char name[48]="DRAW_RECT", line[48]={0};
+        if(fgets(line,sizeof line,f)){ size_t n=strlen(line); while(n&&(line[n-1]=='\n'||line[n-1]=='\r'||line[n-1]==' ')) line[--n]=0; if(n) strncpy(name,line,sizeof name-1); }
+        fclose(f);
+        PopupNotify("menu_clone loaded: hook mode - L1 + Circle opens the menu");
+        if(!InstallFrameHook(name)) PopupNotify("menu_clone: hook FAILED (see menu_clone.log)");
+        return nullptr;
+    }
+#endif
     FILE* f=fopen("/data/16menu/config/thread_tick.txt","r");
-    if(!f){ ps4::Log("thread_tick.txt not present: idle (waiting for the real per-frame hook)"); return nullptr; }
+    if(!f){ ps4::Log("no hook_tick.txt / thread_tick.txt: idle"); PopupNotify("menu_clone loaded (idle: create hook_tick.txt or thread_tick.txt)"); return nullptr; }
     fclose(f);
     ps4::Log("thread_tick mode ON: calling OnScriptTick() from this thread");
+    PopupNotify("menu_clone loaded: thread mode - L1 + Circle opens the menu");
     while(g_run){ OnScriptTick(); ps4::Usleep(16000); }
     return nullptr;
 }

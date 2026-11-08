@@ -65,6 +65,8 @@ struct NativeCtx {              // matches the original's global at VA 0x123d1a0
 void     NativesInit();                         // reads force_version.txt, sets version
 void     SetGameVersion(GameVer v);
 uint64_t NativeInvoke(NativeOff off, const uint64_t* a, int n);
+uint64_t NativeAddr(NativeOff off);                       // absolute address of the handler in the running game
+bool     NativeByName(const char* name, NativeOff& out);   // "DRAW_RECT", "PAD_A", ...
 
 // ---- argument packing: floats = 32-bit pattern, ints = 32-bit, pointers = 64-bit
 inline uint64_t A(float f)        { uint32_t u; memcpy(&u,&f,4); return u; }

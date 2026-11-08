@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include "ps4_compat.h"
+#include "notify.h"
 
 // ---------- primitives (same native sequences the original uses) ----------
 void Menu::Rect(float x,float y,float w,float h,int r,int g,int b,int a){
@@ -113,6 +114,7 @@ void Menu::Input(){
     if(combo && !comboPrev){
         open = !open; cooldown = 20;                       // ~1/3 s: ignore everything else after toggling
         ps4::Log(open ? "menu opened" : "menu closed");
+        PopupNotify(open ? "menu_clone: menu OPENED" : "menu_clone: menu closed");
         Notify(open ? "Menu OPENED - menu_clone is working" : "Menu closed"); msgFrames = 300;
     }
     comboPrev = combo;

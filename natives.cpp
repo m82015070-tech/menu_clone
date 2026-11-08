@@ -25,3 +25,16 @@ uint64_t NativeInvoke(NativeOff off,const uint64_t* a,int n){
     handler(&g_ctx);
     return g_buf[0];
 }
+
+uint64_t NativeAddr(NativeOff off){ return (uint64_t)EBOOT_BASE + ((g_ver==GameVer::V157)? off.v157 : off.v156); }
+bool NativeByName(const char* name, NativeOff& out){
+    struct E{ const char* n; NativeOff o; };
+    static const E t[]={
+        {"DRAW_RECT",NAT::DRAW_RECT},{"DRAW_SPRITE",NAT::DRAW_SPRITE},
+        {"REQUEST_TXD",NAT::REQUEST_STREAMED_TEXTURE_DICT},{"HAS_TXD",NAT::HAS_STREAMED_TEXTURE_DICT_LOADED},
+        {"SET_TEXT_FONT",NAT::SET_TEXT_FONT},{"SET_TEXT_SCALE",NAT::SET_TEXT_SCALE},{"SET_TEXT_COLOUR",NAT::SET_TEXT_COLOUR},
+        {"BEGIN_TEXT",NAT::BEGIN_TEXT_COMMAND_DISPLAY_TEXT},{"END_TEXT",NAT::END_TEXT_COMMAND_DISPLAY_TEXT},
+        {"PAD_A",NAT::PAD_A},{"PAD_B",NAT::PAD_B},{"PAD_C",NAT::PAD_C}};
+    for(const E& e:t) if(!strcmp(e.n,name)){ out=e.o; return true; }
+    return false;
+}
