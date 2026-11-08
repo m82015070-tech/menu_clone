@@ -97,53 +97,51 @@ void Menu::BuildMusic(){
 
 // ---------- input ----------
 // Pad natives are called as (0, control). 187=DOWN 188=UP 189=LEFT 190=RIGHT 201=ACCEPT(X) 202=CANCEL(Circle) 205=LB(L1).
-// Every control is polled ONCE per tick and we detect the press edge ourselves, so it works whether the native reports
-// "pressed" or "just pressed". Open/close combo: L1 + Circle. While L1 is held the menu ignores navigation.
+// We have three such natives (PAD_A/B/C) and are not sure which one means "held": PadTracker (pad.h) learns it while you play
+// (hold any button for a moment). Open/close: hold L1 and press Circle. While L1 is held the menu ignores navigation.
 void Menu::Input(){
-    enum { C_ACCEPT, C_BACK, C_DOWN, C_UP, C_LEFT, C_RIGHT, C_COUNT };
-    static const int ids[C_COUNT] = { 201, 202, 187, 188, 189, 190 };
-    static bool prev[C_COUNT] = {};
-    static bool comboPrev = false;
-    static int  cooldown = 0;
+    static const int ids[CTRL_N] = { 201, 202, 187, 188, 189, 190, 205 };       // order = enum in pad.h
+    static const NativeOff* nat[PAD_N] = { &NAT::PAD_A, &NAT::PAD_B, &NAT::PAD_C };
+    static int cooldown = 0;
+    if(!pad.log) pad.log = ps4::Log;
 
-    bool cur[C_COUNT], edge[C_COUNT];
-    for(int i=0;i<C_COUNT;i++){ cur[i] = Call(NAT::PAD_A,0,ids[i])!=0; edge[i] = cur[i] && !prev[i]; prev[i] = cur[i]; }
-    bool lb = Call(NAT::PAD_B,0,205)!=0;
+    bool raw[PAD_N][CTRL_N];
+    for(int n=0;n<PAD_N;n++) for(int c=0;c<CTRL_N;c++) raw[n][c] = Call(*nat[n],0,ids[c])!=0;
+    pad.Update(ps4::TimeUs(), raw, ids);
+    const bool lb = pad.lb;
 
-    // open / close with L1 + Circle (once per press; the same press must NOT also act as "Back")
-    bool combo = lb && cur[C_BACK];
-    if(combo && !comboPrev){
-        open = !open; cooldown = 20;                       // ~1/3 s: ignore everything else after toggling
+    // open / close with L1 + Circle (the same press must NOT also act as "Back")
+    if(lb && pad.edge[C_BACK]){
+        open = !open; cooldown = 20;
         ps4::Log(open ? "menu opened" : "menu closed");
         PopupNotify(open ? "menu_clone: menu OPENED" : "menu_clone: menu closed");
         Notify(open ? "Menu OPENED - menu_clone is working" : "Menu closed"); msgFrames = 300;
     }
-    comboPrev = combo;
     if(cooldown > 0){ cooldown--; return; }
 
     // Music hotkeys with the menu closed: L1 + D-pad  (Right = next, Left = previous, Down = play/pause)
     if(lb && !open){
-        if(edge[C_RIGHT]) music.Next(); else if(edge[C_LEFT]) music.Prev(); else if(edge[C_DOWN]) music.TogglePause();
+        if(pad.edge[C_RIGHT]) music.Next(); else if(pad.edge[C_LEFT]) music.Prev(); else if(pad.edge[C_DOWN]) music.TogglePause();
         return;
     }
     if(!open || lb) return;
 
     Page& p = pages[page]; int n = (int)p.rows.size(); if(n == 0) return;
     if(sel >= n) sel = 0;
-    if(edge[C_UP])   sel = (sel+n-1)%n;
-    if(edge[C_DOWN]) sel = (sel+1)%n;
+    if(pad.edge[C_UP])   sel = (sel+n-1)%n;
+    if(pad.edge[C_DOWN]) sel = (sel+1)%n;
     Row& r = p.rows[sel];
-    if(edge[C_ACCEPT]){
+    if(pad.edge[C_ACCEPT]){
         if(r.type==RowType::Submenu && r.submenu>=0){ page=r.submenu; sel=0; scroll=0; }
         else if(r.type==RowType::Toggle && r.toggle) *r.toggle=!*r.toggle;
         if(r.onSelect && r.type!=RowType::List) r.onSelect();
         return;   // callbacks may schedule a page rebuild; never touch 'r' after them
     }
     if(r.type==RowType::List && r.optIndex){ int m=(int)r.options.size(); bool ch=false;
-        if(edge[C_LEFT])  { *r.optIndex=(*r.optIndex+m-1)%m; ch=true; }
-        if(edge[C_RIGHT]) { *r.optIndex=(*r.optIndex+1)%m;   ch=true; }
+        if(pad.edge[C_LEFT])  { *r.optIndex=(*r.optIndex+m-1)%m; ch=true; }
+        if(pad.edge[C_RIGHT]) { *r.optIndex=(*r.optIndex+1)%m;   ch=true; }
         if(ch && r.onSelect) r.onSelect(); }
-    if(edge[C_BACK]){ if(p.parent>=0){ page=p.parent; sel=0; scroll=0; } else { open=false; Notify("Menu closed"); msgFrames=120; } }
+    if(pad.edge[C_BACK]){ if(p.parent>=0){ page=p.parent; sel=0; scroll=0; } else { open=false; Notify("Menu closed"); msgFrames=120; } }
 }
 
 // ---------- drawing ----------
