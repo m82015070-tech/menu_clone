@@ -97,6 +97,9 @@ jobs:
             echo; echo "=== lines mentioning hook/detour/mprotect/patch"
             grep -rniE "hook|detour|mprotect|patch|jailbreak|kexec" $GOLDHEN_SDK/include | head -150
             for f in $GOLDHEN_SDK/include/*.h; do echo; echo "=== FILE $f"; cat "$f"; done
+            echo; echo "=== SDK SOURCES (Detour / Patcher / Syscall)"
+            find $GOLDHEN_SDK -maxdepth 3 \( -name "*.c" -o -name "*.cpp" -o -name "*.s" -o -name "*.S" \) | head -20
+            for f in $(find $GOLDHEN_SDK -maxdepth 3 \( -name "Detour*" -o -name "Patcher*" -o -name "Syscall*" \) -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.s" -o -name "*.S" \)); do echo "=== FILE $f"; cat "$f"; done
             echo; echo "=== plugin_template sources"
             for f in $HOME/repo/plugin_src/plugin_template/source/*; do echo "=== FILE $f"; cat "$f"; done
             echo; echo "=== common"; ls -la $HOME/repo/common
