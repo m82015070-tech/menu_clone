@@ -83,10 +83,12 @@ static void FrameNativeHook(void* ctx){
     g_lastUs=now; g_inHook=1; OnScriptTick(); g_inHook=0;
 }
 static bool InstallFrameHook(const char* name){
+    NativesInit();                                        // reads force_version.txt: the address depends on the game version
     NativeOff off{0,0};
     if(!NativeByName(name,off)){ ps4::Log("hook: unknown native name in hook_tick.txt"); return false; }
     uint64_t addr=NativeAddr(off);
     char b[128]; snprintf(b,sizeof b,"hook: installing on %s at 0x%llX",name,(unsigned long long)addr); ps4::Log(b);
+    { unsigned char* c=(unsigned char*)addr; char hb[96]; snprintf(hb,sizeof hb,"hook: target bytes %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",c[0],c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8],c[9],c[10],c[11]); ps4::Log(hb); }
     Detour_Construct(&g_det, DetourMode_x64);
     void* stub=Detour_DetourFunction(&g_det,(uint64_t)addr,(void*)FrameNativeHook);
     ps4::Log(stub ? "hook: installed (waiting for the game to call it)" : "hook: Detour_DetourFunction returned NULL");
@@ -118,6 +120,7 @@ static void* BootThread(void*){
     if(!f){ ps4::Log("no hook_tick.txt / thread_tick.txt: idle"); PopupNotify("menu_clone loaded (idle: create hook_tick.txt or thread_tick.txt)"); return nullptr; }
     fclose(f);
     ps4::Log("thread_tick mode ON: calling OnScriptTick() from this thread");
+    M().safeMode=true;   // foreign thread: no texture / scaleform natives (they crashed the game)
     PopupNotify("menu_clone loaded: thread mode - L1 + Circle opens the menu");
     while(g_run){ OnScriptTick(); ps4::Usleep(16000); }
     return nullptr;

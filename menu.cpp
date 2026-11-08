@@ -11,6 +11,7 @@ void Menu::Rect(float x,float y,float w,float h,int r,int g,int b,int a){
 }
 // Original sprite helper (VA 0xb430): REQUEST dict -> HAS_LOADED -> DRAW_SPRITE
 bool Menu::Sprite(const char* d,const char* n,float x,float y,float w,float h,float rot,int r,int g,int b,int a){
+    if(safeMode) return false;      // texture natives need the game's own script thread
     Call(NAT::REQUEST_STREAMED_TEXTURE_DICT,d,0);
     if(!Call(NAT::HAS_STREAMED_TEXTURE_DICT_LOADED,d)) return false;
     Call(NAT::DRAW_SPRITE,d,n,x,y,w,h,rot,r,g,b,a); return true;
@@ -147,9 +148,12 @@ void Menu::Input(){
 
 // ---------- drawing ----------
 void Menu::Draw(){
+    static bool first=true; if(first) ps4::Log("draw: first Draw() start");
     Page& p=pages[page]; float x=cfg.x,w=cfg.width,rh=cfg.rowHeight,top=0.10f;
-    Sprite("commonmenu","header_gradient_script",x,top+cfg.bannerHeight/2,w,cfg.bannerHeight,0);
+    if(safeMode) Rect(x,top+cfg.bannerHeight/2,w,cfg.bannerHeight,190,30,110,235);      // plain banner (no texture)
+    else         Sprite("commonmenu","header_gradient_script",x,top+cfg.bannerHeight/2,w,cfg.bannerHeight,0);
     Text(p.title,x-w/2+0.01f,top+cfg.bannerHeight*0.30f,0.9f,255,255,255,255,1);
+    if(first) ps4::Log("draw: banner done");
     float y=top+cfg.bannerHeight+cfg.titleGap; int n=(int)p.rows.size(), vis=n<cfg.maxVisible?n:cfg.maxVisible;
     if(sel<scroll)scroll=sel; if(sel>=scroll+vis)scroll=sel-vis+1;
     for(int i=0;i<vis;i++){
@@ -157,21 +161,35 @@ void Menu::Draw(){
         if(s) Rect(x,cy,w,rh,255,255,255,255); else Rect(x,cy,w,rh,6,4,20,105);    // panel colour (6,4,20,105) from the original
         int tc=s?0:255;
         if(r.icon) Sprite("commonmenu",r.icon,x-w/2+0.014f,cy,cfg.iconW,cfg.iconH,0,tc,tc,tc,255);
-        Text(r.label,x-w/2+0.030f,cy+cfg.textYOffset,cfg.textScale,tc,tc,tc,255,0);
-        if(r.type==RowType::Submenu) Sprite("commonmenu","arrowright",x+w/2-0.012f,cy,0.012f,0.02f,0,tc,tc,tc,255);
-        if(r.type==RowType::Toggle&&r.toggle&&*r.toggle) Sprite("commonmenu","shop_tick_icon",x+w/2-0.014f,cy,cfg.iconW,cfg.iconH,0,tc,tc,tc,255);
-        if(r.type==RowType::List&&r.optIndex){ char b[96]; snprintf(b,sizeof b,"< %s >",r.options[*r.optIndex].c_str()); Text(b,x+w/2-0.08f,cy+cfg.textYOffset,cfg.textScale,tc,tc,tc,255,0);}    
+        Text(r.label,x-w/2+(safeMode?0.010f:0.030f),cy+cfg.textYOffset,cfg.textScale,tc,tc,tc,255,0);
+        if(r.type==RowType::Submenu){
+            if(safeMode) Text(">",x+w/2-0.012f,cy+cfg.textYOffset,cfg.textScale,tc,tc,tc,255,0);
+            else Sprite("commonmenu","arrowright",x+w/2-0.012f,cy,0.012f,0.02f,0,tc,tc,tc,255);
+        }
+        if(r.type==RowType::Toggle&&r.toggle){
+            if(safeMode) Text(*r.toggle?"ON":"OFF",x+w/2-0.032f,cy+cfg.textYOffset,cfg.textScale,tc,tc,tc,255,0);
+            else if(*r.toggle) Sprite("commonmenu","shop_tick_icon",x+w/2-0.014f,cy,cfg.iconW,cfg.iconH,0,tc,tc,tc,255);
+        }
+        if(r.type==RowType::List&&r.optIndex){ char b[96]; snprintf(b,sizeof b,"< %s >",r.options[*r.optIndex].c_str()); Text(b,x+w/2-0.08f,cy+cfg.textYOffset,cfg.textScale,tc,tc,tc,255,0);}
     }
+    if(first) ps4::Log("draw: rows done");
     float fy=y+vis*rh+rh/2; Rect(x,fy,w,rh,6,4,20,105);
     char cnt[24]; snprintf(cnt,sizeof cnt,"%i / %i",sel+1,n); Text(cnt,x+w/2-0.06f,fy+cfg.textYOffset,cfg.textScale,255,255,255,255,0);
-    Sprite("commonmenu","shop_arrows_upanddown",x,fy,0.02f,0.03f,0);   // 0.02 x 0.03 from the original
+    Sprite("commonmenu","shop_arrows_upanddown",x,fy,0.02f,0.03f,0);   // 0.02 x 0.03 from the original (skipped in safe mode)
+    if(safeMode){                                                        // text footer instead of the scaleform buttons
+        Rect(x,fy+rh,w,rh,6,4,20,105);
+        Text("X: Select    D-pad: Scroll    O: Back",x-w/2+0.010f,fy+rh+cfg.textYOffset,0.28f,255,255,255,255,0);
+    }
+    if(first) ps4::Log("draw: footer next");
     DrawFooter();
+    if(first){ ps4::Log("draw: first Draw() finished without crash"); first=false; }
 }
 
 // Footer = scaleform "instructional_buttons". Sequence taken from VA 0x11320-0x11120:
 //   REQUEST_SCALEFORM_MOVIE -> BEGIN "CLEAR_ALL" END -> BEGIN "SET_CLEAR_SPACE"(200) END -> SET_DATA_SLOT x3
 //   -> BEGIN "DRAW_INSTRUCTIONAL_BUTTONS" END -> BEGIN "SET_BACKGROUND_COLOUR"(0,0,0,..) END -> DRAW_SCALEFORM_MOVIE_FULLSCREEN
 void Menu::DrawFooter(){
+    if(safeMode) return;            // scaleform natives need the game's own script thread
     if(!movie) movie=(uint32_t)Call(NAT::REQUEST_SCALEFORM_MOVIE,"instructional_buttons");
     auto begin=[&](const char* m){ Call(NAT::BEGIN_SCALEFORM_MOVIE_METHOD,movie,m); };
     auto end  =[&]{ Call(NAT::END_SCALEFORM_MOVIE_METHOD); };

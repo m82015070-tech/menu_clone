@@ -20,6 +20,7 @@ public:
     MenuConfig cfg; std::vector<Page> pages; int page=0, sel=0, scroll=0; bool open=false;
     ScriptManager scripts; AddonManager addons; MusicPlayer music;
     bool scriptOn[64]={}, addonOn[64]={}; int vol=7; std::string msg; int msgFrames=0; int pendingRebuild=0;
+    bool safeMode=false;   // true when ticking from a foreign thread: only DRAW_RECT + text natives (no textures / scaleform)
     void Init(); void Tick(); void Shutdown();
     void Notify(const char* m){ msg=m; msgFrames=240; }
 private:
