@@ -177,8 +177,14 @@ void Menu::Tick(){
     static bool firstTick=true; if(firstTick){ firstTick=false; ps4::Log("first Tick: the per-frame call is working"); }
     if(pendingRebuild){ if(pendingRebuild==1){ scripts.Scan(); BuildScripts(); } else if(pendingRebuild==2){ addons.Scan(); BuildAddons(); } else { music.Scan(); BuildMusic(); }
         pendingRebuild=0; sel=0; scroll=0; }
-    Input(); if(open) Draw(); DrawWidget(); scripts.Tick();
+    static int stage=0;
+    if(stage==0) ps4::Log("tick stage 1: before Input() (first game native call is inside)");
+    Input();
+    if(stage==0) ps4::Log("tick stage 2: Input() returned (pad natives OK)");
+    if(open) Draw(); DrawWidget(); scripts.Tick();
+    if(stage==0) ps4::Log("tick stage 3: before message box (DRAW_RECT / text natives)");
     if(msgFrames>0){ msgFrames--;                                   // message box, bottom centre, visible with the menu open or closed
         Rect(0.5f,0.915f,0.34f,0.045f,6,4,20,200);
         Text(msg,0.5f,0.915f-0.014f,0.36f,255,255,255,255,0,0); }
+    if(stage==0){ ps4::Log("tick stage 4: first full tick finished without crash"); stage=1; }
 }
