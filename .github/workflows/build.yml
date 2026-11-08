@@ -87,3 +87,27 @@ jobs:
           name: menu_clone_prx
           path: out/*
           if-no-files-found: warn
+
+      - name: Dump SDK info
+        if: always()
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/info
+          {
+            echo "=== GOLDHEN SDK include dir"; ls -la $GOLDHEN_SDK/include
+            echo; echo "=== lines mentioning hook/detour/mprotect/patch"
+            grep -rniE "hook|detour|mprotect|patch|jailbreak|kexec" $GOLDHEN_SDK/include | head -150
+            for f in $GOLDHEN_SDK/include/*.h; do echo; echo "=== FILE $f"; cat "$f"; done
+            echo; echo "=== plugin_template sources"
+            for f in $HOME/repo/plugin_src/plugin_template/source/*; do echo "=== FILE $f"; cat "$f"; done
+            echo; echo "=== common"; ls -la $HOME/repo/common
+            cat $HOME/repo/common/plugin_common.h
+            echo; echo "=== another plugin that hooks (game_patch/afr)"; ls $HOME/repo/plugin_src
+          } 2>&1 | head -c 600000 > $GITHUB_WORKSPACE/info/sdk_info.txt
+          ls -la $GITHUB_WORKSPACE/info
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk_info
+          path: info/sdk_info.txt
+          if-no-files-found: warn
