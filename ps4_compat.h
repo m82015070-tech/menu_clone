@@ -14,16 +14,25 @@ namespace ps4 {
     int  LoadStartModule(const char* path, size_t argc, const void* argv, unsigned flags, const void* opt, int* res) __asm__("sceKernelLoadStartModule");
     int  StopUnloadModule(int handle, size_t argc, const void* argv, unsigned flags, const void* opt, int* res)     __asm__("sceKernelStopUnloadModule");
     int  Dlsym(int handle, const char* name, void** addr)                                                __asm__("sceKernelDlsym");
-    int  AudioInit(void)                                                                                 __asm__("sceAudioOutInit");
-    int  AudioOpen(int user, int type, int index, unsigned len, unsigned freq, unsigned param)           __asm__("sceAudioOutOpen");
-    int  AudioOutput(int handle, const void* buf)                                                        __asm__("sceAudioOutOutput");
-    int  AudioClose(int handle)                                                                          __asm__("sceAudioOutClose");
+    // Audio is resolved when the music thread starts (NOT at plugin load): the plugin must not depend on libSceAudioOut at load time.
+    struct AudioApi { int(*init)(void)=nullptr; int(*open)(int,int,int,unsigned,unsigned,unsigned)=nullptr; int(*output)(int,const void*)=nullptr; int(*close)(int)=nullptr; };
     int  KOpen(const char* path, int flags, int mode)                                                    __asm__("sceKernelOpen");
     int  KClose(int fd)                                                                                  __asm__("sceKernelClose");
     int  KGetdents(int fd, char* buf, int nbytes)                                                        __asm__("sceKernelGetdents");
 
     // Append one line to /data/16menu/menu_clone.log (proof that the code ran, even if nothing is drawn)
     inline void Log(const char* line){ FILE* f=fopen("/data/16menu/menu_clone.log","a"); if(f){ fputs(line,f); fputs("\n",f); fclose(f);} }
+
+    inline bool LoadAudio(AudioApi& a){
+        static const char* paths[]={"/system/common/lib/libSceAudioOut.sprx","libSceAudioOut.sprx"};
+        int h=-1; for(const char* p:paths){ int res=0; h=LoadStartModule(p,0,nullptr,0,nullptr,&res); if(h>=0) break; }
+        if(h<0) return false; void* f=nullptr;
+        if(Dlsym(h,"sceAudioOutInit",&f)!=0||!f) return false;   a.init  =(int(*)(void))f; f=nullptr;
+        if(Dlsym(h,"sceAudioOutOpen",&f)!=0||!f) return false;   a.open  =(int(*)(int,int,int,unsigned,unsigned,unsigned))f; f=nullptr;
+        if(Dlsym(h,"sceAudioOutOutput",&f)!=0||!f) return false; a.output=(int(*)(int,const void*))f; f=nullptr;
+        if(Dlsym(h,"sceAudioOutClose",&f)!=0||!f) return false;  a.close =(int(*)(int))f;
+        return true;
+    }
 
     // case-insensitive compare (no libc dependency)
     inline int StrCaseCmp(const char* a, const char* b){
