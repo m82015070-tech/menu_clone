@@ -1,6 +1,7 @@
 #include "menu.h"
 #include "natives.h"
 #include <cstdio>
+#include <cstring>
 #include "ps4_compat.h"
 
 // ---------- primitives (same native sequences the original uses) ----------
@@ -93,29 +94,53 @@ void Menu::BuildMusic(){
 }
 
 // ---------- input ----------
-// Original open logic (VA 0x11700): pad natives called as (0, control). 202=FRONTEND_CANCEL, 205=FRONTEND_LB.
-// Default combo in my version: LB + CANCEL held opens/closes. Replace with the combo from your settings.
+// Pad natives are called as (0, control). 187=DOWN 188=UP 189=LEFT 190=RIGHT 201=ACCEPT(X) 202=CANCEL(Circle) 205=LB(L1).
+// Every control is polled ONCE per tick and we detect the press edge ourselves, so it works whether the native reports
+// "pressed" or "just pressed". Open/close combo: L1 + Circle. While L1 is held the menu ignores navigation.
 void Menu::Input(){
-    static bool prevOpen=false; bool lb=Call(NAT::PAD_B,0,205)!=0, cancel=Call(NAT::PAD_A,0,202)!=0;
-    if(lb&&cancel&&!prevOpen){ open=!open; prevOpen=true; ps4::Log(open?"menu opened":"menu closed"); Notify(open?"Menu OPENED - menu_clone is working":"Menu closed"); msgFrames=300; } if(!(lb&&cancel)) prevOpen=false;
-    // Music hotkeys (work even when the menu is closed): LB + DPad  => Right=next, Left=prev, Down=play/pause
-    { bool lbHeld=Call(NAT::PAD_B,0,205)!=0;
-      if(lbHeld&&!open){ if(Call(NAT::PAD_A,0,190)) music.Next(); else if(Call(NAT::PAD_A,0,189)) music.Prev(); else if(Call(NAT::PAD_A,0,187)) music.TogglePause(); } }
-    if(!open) return;
-    auto jp=[&](int c){ return Call(NAT::PAD_A,0,c)!=0; };
-    Page& p=pages[page]; int n=(int)p.rows.size();
-    if(jp(188)) sel=(sel+n-1)%n;      // FRONTEND_UP
-    if(jp(187)) sel=(sel+1)%n;        // FRONTEND_DOWN
-    Row& r=p.rows[sel];
-    if(jp(201)){                       // ACCEPT
+    enum { C_ACCEPT, C_BACK, C_DOWN, C_UP, C_LEFT, C_RIGHT, C_COUNT };
+    static const int ids[C_COUNT] = { 201, 202, 187, 188, 189, 190 };
+    static bool prev[C_COUNT] = {};
+    static bool comboPrev = false;
+    static int  cooldown = 0;
+
+    bool cur[C_COUNT], edge[C_COUNT];
+    for(int i=0;i<C_COUNT;i++){ cur[i] = Call(NAT::PAD_A,0,ids[i])!=0; edge[i] = cur[i] && !prev[i]; prev[i] = cur[i]; }
+    bool lb = Call(NAT::PAD_B,0,205)!=0;
+
+    // open / close with L1 + Circle (once per press; the same press must NOT also act as "Back")
+    bool combo = lb && cur[C_BACK];
+    if(combo && !comboPrev){
+        open = !open; cooldown = 20;                       // ~1/3 s: ignore everything else after toggling
+        ps4::Log(open ? "menu opened" : "menu closed");
+        Notify(open ? "Menu OPENED - menu_clone is working" : "Menu closed"); msgFrames = 300;
+    }
+    comboPrev = combo;
+    if(cooldown > 0){ cooldown--; return; }
+
+    // Music hotkeys with the menu closed: L1 + D-pad  (Right = next, Left = previous, Down = play/pause)
+    if(lb && !open){
+        if(edge[C_RIGHT]) music.Next(); else if(edge[C_LEFT]) music.Prev(); else if(edge[C_DOWN]) music.TogglePause();
+        return;
+    }
+    if(!open || lb) return;
+
+    Page& p = pages[page]; int n = (int)p.rows.size(); if(n == 0) return;
+    if(sel >= n) sel = 0;
+    if(edge[C_UP])   sel = (sel+n-1)%n;
+    if(edge[C_DOWN]) sel = (sel+1)%n;
+    Row& r = p.rows[sel];
+    if(edge[C_ACCEPT]){
         if(r.type==RowType::Submenu && r.submenu>=0){ page=r.submenu; sel=0; scroll=0; }
         else if(r.type==RowType::Toggle && r.toggle) *r.toggle=!*r.toggle;
         if(r.onSelect && r.type!=RowType::List) r.onSelect();
         return;   // callbacks may schedule a page rebuild; never touch 'r' after them
     }
-    if(r.type==RowType::List && r.optIndex){ int m=(int)r.options.size();
-        bool ch=false; if(jp(189)){ *r.optIndex=(*r.optIndex+m-1)%m; ch=true; } if(jp(190)){ *r.optIndex=(*r.optIndex+1)%m; ch=true; } if(ch&&r.onSelect) r.onSelect(); }
-    if(jp(202)){ if(p.parent>=0){ page=p.parent; sel=0; scroll=0; } else open=false; }   // CANCEL
+    if(r.type==RowType::List && r.optIndex){ int m=(int)r.options.size(); bool ch=false;
+        if(edge[C_LEFT])  { *r.optIndex=(*r.optIndex+m-1)%m; ch=true; }
+        if(edge[C_RIGHT]) { *r.optIndex=(*r.optIndex+1)%m;   ch=true; }
+        if(ch && r.onSelect) r.onSelect(); }
+    if(edge[C_BACK]){ if(p.parent>=0){ page=p.parent; sel=0; scroll=0; } else { open=false; Notify("Menu closed"); msgFrames=120; } }
 }
 
 // ---------- drawing ----------
@@ -159,19 +184,39 @@ void Menu::DrawFooter(){
     Call(NAT::DRAW_SCALEFORM_MOVIE_FULLSCREEN,movie,255,255,255,0,0);
 }
 
-// Now-playing widget: drawn every frame, independent of the menu being open.
+// Now-playing widget, drawn EVERY frame (menu open or closed). Look copied from the original:
+// dark pill, top centre; 4 pink equaliser bars on the left, elapsed time on the right, thin pink progress line at the bottom.
 void Menu::DrawWidget(){
     if(!music.showWidget || (!music.Playing() && !music.Paused())) return;
-    const float x=0.86f,y=0.075f,w=0.26f,h=0.075f;
-    Rect(x,y,w,h,6,4,20,160);
-    Sprite("commonmenu","header_gradient_script",x,y-h/2+0.004f,w,0.008f,0);       // thin accent bar on top
-    Text(music.Title(),x-w/2+0.008f,y-h/2+0.010f,0.30f,255,255,255,255,0);
-    float dur=music.Duration(), pos=music.Position(); if(pos>dur) pos=dur; float frac=dur>0?pos/dur:0;
-    float bx=x-w/2+0.008f, bw=w-0.016f, by=y+0.012f;
-    Rect(bx+bw/2,by,bw,0.006f,255,255,255,60);                                         // track
-    Rect(bx+bw*frac/2,by,bw*frac,0.006f,255,255,255,230);                              // progress
-    char t[48]; int p=(int)pos,d=(int)dur; snprintf(t,sizeof t,"%s  %d:%02d / %d:%02d",music.Paused()?"PAUSED":"PLAYING",p/60,p%60,d/60,d%60);
-    Text(t,x-w/2+0.008f,y-0.002f,0.26f,255,255,255,220,0);
+    const float cx=0.5f, cy=0.040f, w=0.16f, h=0.050f;               // 16:9 screen, ratio ~5.7:1 like the screenshot
+    const float left=cx-w/2, right=cx+w/2, bottom=cy+h/2;
+
+    // pill body = 20 horizontal strips whose ends follow a circle (no sqrt needed: precomputed insets)
+    static const float inset[20]={0.6878f,0.4732f,0.3386f,0.2401f,0.1648f,0.1070f,0.0633f,0.0318f,0.0113f,0.0013f,0.0013f,0.0113f,0.0318f,0.0633f,0.1070f,0.1648f,0.2401f,0.3386f,0.4732f,0.6878f};
+    const float rx=(h/2)*0.5625f, sh=h/20.0f;                         // horizontal corner radius corrected for 16:9
+    for(int i=0;i<20;i++){ float sw=w-2.0f*rx*inset[i]; float sy=cy-h/2+sh*(i+0.5f); Rect(cx,sy,sw,sh,12,9,20,232); }
+
+    // equaliser bars (animate while playing, flat while paused)
+    const bool playing = music.Playing() && !music.Paused();
+    const float pos0 = music.Position();
+    static const float spd[4]={2.3f,3.1f,1.7f,2.7f}, ph[4]={0.0f,0.35f,0.7f,0.15f};
+    const float baseY = cy+0.009f;
+    for(int i=0;i<4;i++){
+        float u=pos0*spd[i]+ph[i]; u-=(float)(int)u; float tri=(u<0.5f)?u*2.0f:2.0f-2.0f*u;
+        float bh = playing ? (0.006f+0.016f*tri) : 0.006f;
+        Rect(left+0.0150f+i*0.0052f, baseY-bh/2.0f, 0.0030f, bh, 255,70,170,255);
+    }
+
+    // progress line (bottom) : faint track + pink fill
+    float dur=music.Duration(), pos=pos0; if(pos>dur) pos=dur; float frac=dur>0?pos/dur:0.0f;
+    const float x0=left+0.014f, x1=right-0.014f, len=x1-x0, py=bottom-0.0085f;
+    Rect(x0+len/2.0f,py,len,0.0030f,255,255,255,45);
+    if(frac>0.0f) Rect(x0+len*frac/2.0f,py,len*frac,0.0030f,255,70,170,255);
+
+    // elapsed time, right side
+    char t[16]; int ps=(int)pos; snprintf(t,sizeof t,"%d:%02d",ps/60,ps%60);
+    float tw=0.0058f*(float)strlen(t);
+    Text(t,right-0.014f-tw,cy-0.0135f,0.30f,255,255,255,235,0,1);
 }
 void Menu::Tick(){
     static bool firstTick=true; if(firstTick){ firstTick=false; ps4::Log("first Tick: the per-frame call is working"); }

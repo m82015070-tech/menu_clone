@@ -23,15 +23,20 @@ namespace ps4 {
     // Append one line to /data/16menu/menu_clone.log (proof that the code ran, even if nothing is drawn)
     inline void Log(const char* line){ FILE* f=fopen("/data/16menu/menu_clone.log","a"); if(f){ fputs(line,f); fputs("\n",f); fclose(f);} }
 
-    inline bool LoadAudio(AudioApi& a){
-        static const char* paths[]={"/system/common/lib/libSceAudioOut.sprx","libSceAudioOut.sprx"};
-        int h=-1; for(const char* p:paths){ int res=0; h=LoadStartModule(p,0,nullptr,0,nullptr,&res); if(h>=0) break; }
-        if(h<0) return false; void* f=nullptr;
+    inline bool FillAudio(int h, AudioApi& a){
+        void* f=nullptr;
         if(Dlsym(h,"sceAudioOutInit",&f)!=0||!f) return false;   a.init  =(int(*)(void))f; f=nullptr;
         if(Dlsym(h,"sceAudioOutOpen",&f)!=0||!f) return false;   a.open  =(int(*)(int,int,int,unsigned,unsigned,unsigned))f; f=nullptr;
         if(Dlsym(h,"sceAudioOutOutput",&f)!=0||!f) return false; a.output=(int(*)(int,const void*))f; f=nullptr;
         if(Dlsym(h,"sceAudioOutClose",&f)!=0||!f) return false;  a.close =(int(*)(int))f;
         return true;
+    }
+    // 1) load the library (works if the game has not loaded it), 2) otherwise look through every already loaded module.
+    inline bool LoadAudio(AudioApi& a){
+        static const char* paths[]={"/system/common/lib/libSceAudioOut.sprx","libSceAudioOut.sprx"};
+        for(const char* p:paths){ int res=0; int h=LoadStartModule(p,0,nullptr,0,nullptr,&res); if(h>=0 && FillAudio(h,a)){ Log("audio: found via LoadStartModule"); return true; } }
+        for(int h=0;h<1024;h++){ if(FillAudio(h,a)){ char b[64]; snprintf(b,sizeof b,"audio: found in already loaded module handle %d",h); Log(b); return true; } }
+        Log("audio: sceAudioOut* not found anywhere"); return false;
     }
 
     // case-insensitive compare (no libc dependency)

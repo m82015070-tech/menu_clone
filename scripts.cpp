@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "scripts.h"
 #include <cstring>
 #include <algorithm>
@@ -17,6 +18,7 @@ void ScriptManager::Scan(){
 bool ScriptManager::Load(int i,const HostApi* host){
     if(i<0||i>=(int)list.size()||list[i].on) return false; ScriptEntry& s=list[i];
     int res=0; int h=ps4::LoadStartModule(s.path.c_str(),0,nullptr,0,nullptr,&res);
+    { char b[160]; snprintf(b,sizeof b,"script: LoadStartModule(%s) -> %d (res %d)",s.name.c_str(),h,res); ps4::Log(b); }
     if(h<0) return false;
     s.handle=h;
     void* a=nullptr;

@@ -32,15 +32,20 @@ void MusicPlayer::ThreadMain(){
     ps4::AudioApi au; if(!ps4::LoadAudio(au)){ ps4::Log("music: audio library not available"); return; }
     au.init();
     int h=au.open(0xFF /*SYSTEM user*/, 1 /*PORT_TYPE_BGM*/, 0, 256, 48000, 1 /*S16_STEREO*/);
-    if(h<0) return;
+    { char b[64]; snprintf(b,sizeof b,"music: sceAudioOutOpen(BGM) returned 0x%08X",(unsigned)h); ps4::Log(b); }
+    if(h<0){ h=au.open(0xFF, 0 /*PORT_TYPE_MAIN*/, 0, 256, 48000, 1);
+             char b[64]; snprintf(b,sizeof b,"music: sceAudioOutOpen(MAIN) returned 0x%08X",(unsigned)h); ps4::Log(b); }
+    if(h<0){ ps4::Log("music: could not open any audio port - no sound"); return; }
+    ps4::Log("music: audio port open, waiting for a track");
     static short out[256*2]; static short in[4096*2];
     drmp3 mp3; bool open=false; double srcPos=0; unsigned srcRate=44100; unsigned ch=2; unsigned have=0, base=0; // 'in' holds [base, base+have) frames
     while(!quit){
         if(req!=-2){ int r=req; req=-2;
             if(open){ drmp3_uninit(&mp3); open=false; }
             playing=false; paused=false;
-            if(r>=0 && r<(int)tracks.size() && drmp3_init_file(&mp3,tracks[r].path.c_str(),nullptr)){
-                open=true; cur=r; srcRate=mp3.sampleRate; ch=mp3.channels; srcPos=0; have=0; base=0;
+            if(r>=0 && r<(int)tracks.size() && !drmp3_init_file(&mp3,tracks[r].path.c_str(),nullptr)) ps4::Log("music: mp3 could not be opened/decoded");
+            else if(r>=0 && r<(int)tracks.size()){
+                ps4::Log("music: track opened"); open=true; cur=r; srcRate=mp3.sampleRate; ch=mp3.channels; srcPos=0; have=0; base=0;
                 duration=(float)drmp3_get_pcm_frame_count(&mp3)/(float)srcRate; startFrames=framesOut; playing=true; }
         }
         if(!open||!playing||paused){ memset(out,0,sizeof out); au.output(h,out); if(paused) startFrames++; continue; }
