@@ -97,34 +97,40 @@ void Menu::BuildMusic(){
 
 // ---------- input ----------
 // Pad natives are called as (0, control). 187=DOWN 188=UP 189=LEFT 190=RIGHT 201=ACCEPT(X) 202=CANCEL(Circle) 205=LB(L1).
-// We have three such natives (PAD_A/B/C) and are not sure which one means "held": PadTracker (pad.h) learns it while you play
-// (hold any button for a moment). Open/close: hold L1 and press Circle. While L1 is held the menu ignores navigation.
+// Roles confirmed from a real log: PAD_A = just pressed (1 frame), PAD_B = held, PAD_C = just released (not used).
+// Open/close the menu: press L1 and Circle within 0.7 s of each other, in ANY order (together or one after the other).
 void Menu::Input(){
     static const int ids[CTRL_N] = { 201, 202, 187, 188, 189, 190, 205 };       // order = enum in pad.h
-    static const NativeOff* nat[PAD_N] = { &NAT::PAD_A, &NAT::PAD_B, &NAT::PAD_C };
     static int cooldown = 0;
     if(!pad.log) pad.log = ps4::Log;
 
     bool raw[PAD_N][CTRL_N];
-    for(int n=0;n<PAD_N;n++) for(int c=0;c<CTRL_N;c++) raw[n][c] = Call(*nat[n],0,ids[c])!=0;
-    pad.Update(ps4::TimeUs(), raw, ids);
-    const bool lb = pad.lb;
+    for(int c=0;c<CTRL_N;c++){ raw[0][c] = Call(NAT::PAD_A,0,ids[c])!=0; raw[1][c] = Call(NAT::PAD_B,0,ids[c])!=0; raw[2][c] = false; }
+    pad.Update(raw, ids);
+    const bool lb = pad.down[C_LB];
 
-    // open / close with L1 + Circle (the same press must NOT also act as "Back")
-    if(lb && pad.edge[C_BACK]){
-        open = !open; cooldown = 20;
-        ps4::Log(open ? "menu opened" : "menu closed");
-        PopupNotify(open ? "menu_clone: menu OPENED" : "menu_clone: menu closed");
-        Notify(open ? "Menu OPENED - menu_clone is working" : "Menu closed"); msgFrames = 300;
-    }
-    if(cooldown > 0){ cooldown--; return; }
-
-    // Music hotkeys with the menu closed: L1 + D-pad  (Right = next, Left = previous, Down = play/pause)
-    if(lb && !open){
-        if(pad.edge[C_RIGHT]) music.Next(); else if(pad.edge[C_LEFT]) music.Prev(); else if(pad.edge[C_DOWN]) music.TogglePause();
+    if(!open){
+        if(gesture.Update(ps4::TimeUs(), pad.edge[C_LB], pad.edge[C_BACK])){
+            open = true; cooldown = 20;
+            ps4::Log("menu opened (L1 + Circle gesture)");
+            PopupNotify("menu_clone: menu OPENED");
+            Notify("Menu OPENED - menu_clone is working"); msgFrames = 300;
+            return;
+        }
+        if(cooldown > 0){ cooldown--; return; }
+        // Music hotkeys with the menu closed: L1 held + D-pad (Right = next, Left = previous, Down = play/pause)
+        if(lb){
+            if(pad.edge[C_RIGHT]) music.Next(); else if(pad.edge[C_LEFT]) music.Prev(); else if(pad.edge[C_DOWN]) music.TogglePause();
+        }
         return;
     }
-    if(!open || lb) return;
+
+    // ---- menu is open
+    if(cooldown > 0){ cooldown--; return; }
+    if(lb && pad.edge[C_BACK]){                       // L1 + Circle closes it too
+        open = false; cooldown = 20; ps4::Log("menu closed"); PopupNotify("menu_clone: menu closed"); Notify("Menu closed"); msgFrames = 200; return;
+    }
+    if(lb) return;                                    // L1 held = reserved for hotkeys
 
     Page& p = pages[page]; int n = (int)p.rows.size(); if(n == 0) return;
     if(sel >= n) sel = 0;
@@ -141,7 +147,7 @@ void Menu::Input(){
         if(pad.edge[C_LEFT])  { *r.optIndex=(*r.optIndex+m-1)%m; ch=true; }
         if(pad.edge[C_RIGHT]) { *r.optIndex=(*r.optIndex+1)%m;   ch=true; }
         if(ch && r.onSelect) r.onSelect(); }
-    if(pad.edge[C_BACK]){ if(p.parent>=0){ page=p.parent; sel=0; scroll=0; } else { open=false; Notify("Menu closed"); msgFrames=120; } }
+    if(pad.edge[C_BACK]){ if(p.parent>=0){ page=p.parent; sel=0; scroll=0; } else { open=false; cooldown=20; ps4::Log("menu closed (Circle)"); PopupNotify("menu_clone: menu closed"); Notify("Menu closed"); msgFrames=120; } }
 }
 
 // ---------- drawing ----------
