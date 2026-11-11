@@ -17,6 +17,10 @@ namespace ps4 {
     // Audio is resolved when the music thread starts (NOT at plugin load): the plugin must not depend on libSceAudioOut at load time.
     struct AudioApi { int(*init)(void)=nullptr; int(*open)(int,int,int,unsigned,unsigned,unsigned)=nullptr; int(*output)(int,const void*)=nullptr; int(*close)(int)=nullptr; };
     unsigned long long TimeUs(void) __asm__("sceKernelGetProcessTime");   // microseconds since process start
+    int  KMmap(void* addr, size_t len, int prot, int flags, int fd, long long off, void** res)           __asm__("sceKernelMmap");
+    int  KMunmap(void* addr, size_t len)                                                                 __asm__("sceKernelMunmap");
+    int  AttrInit(void** attr)                                                                           __asm__("scePthreadAttrInit");
+    int  AttrSetStack(void* attr, size_t size)                                                           __asm__("scePthreadAttrSetstacksize");
     int  KOpen(const char* path, int flags, int mode)                                                    __asm__("sceKernelOpen");
     int  KClose(int fd)                                                                                  __asm__("sceKernelClose");
     int  KGetdents(int fd, char* buf, int nbytes)                                                        __asm__("sceKernelGetdents");
@@ -38,6 +42,20 @@ namespace ps4 {
         for(const char* p:paths){ int res=0; int h=LoadStartModule(p,0,nullptr,0,nullptr,&res); if(h>=0 && FillAudio(h,a)){ Log("audio: found via LoadStartModule"); return true; } }
         for(int h=0;h<1024;h++){ if(FillAudio(h,a)){ char b[64]; snprintf(b,sizeof b,"audio: found in already loaded module handle %d",h); Log(b); return true; } }
         Log("audio: sceAudioOut* not found anywhere"); return false;
+    }
+
+    // Executable memory for compiled scripts (read+write+exec, anonymous, private).
+    inline void* ExecAlloc(size_t n){ void* r=nullptr; size_t len=(n+0x3FFF)&~(size_t)0x3FFF; if(KMmap(nullptr,len,7,0x1002,-1,0,&r)!=0) return nullptr; return r; }
+    inline void  ExecFree(void* p,size_t n){ if(p) KMunmap(p,(n+0x3FFF)&~(size_t)0x3FFF); }
+    // Run fn(arg) on a NEW thread with a big stack and wait for it (the compiler is recursive and needs far more stack
+    // than a game script thread has). Falls back to running inline if the thread cannot be created.
+    inline void RunBigStack(void* (*fn)(void*), void* arg, size_t stack){
+        void* attr=nullptr; bool haveAttr = (AttrInit(&attr)==0) && attr!=nullptr;
+        if(haveAttr) AttrSetStack(attr,stack);
+        void* th=nullptr;
+        int rc = ThreadCreate(&th, haveAttr ? (const void*)&attr : nullptr, fn, arg, "tcc_compile");
+        if(rc!=0 || !th){ fn(arg); return; }
+        ThreadJoin(th,nullptr);
     }
 
     // case-insensitive compare (no libc dependency)

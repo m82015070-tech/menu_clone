@@ -42,7 +42,7 @@ void Menu::Init(){
     g_host={1,HostNative,[](float x,float y,float w,float h,int r,int g,int b,int a){ g_m->Rect(x,y,w,h,r,g,b,a); },
             [](const char* s,float x,float y,float sc,int r,int g,int b,int a){ g_m->Text(s,x,y,sc,r,g,b,a,0,1); },
             [](const char* m){ g_m->Notify(m); }};
-    scripts.Scan(); addons.Scan(); music.Init();
+    scripts.Init(this); scripts.Scan(); addons.Scan(); music.Init();
     BuildPages();
     ps4::Log("Menu::Init done");
     Notify("menu_clone loaded - press L1 + Circle");
@@ -50,9 +50,9 @@ void Menu::Init(){
 }
 void Menu::Shutdown(){ scripts.UnloadAll(); music.Shutdown(); }
 
-// 0 root | 1 Scripts | 2 Add-ons | 3 Music | 4 Settings
+// 0 root | 1 Scripts | 2 Add-ons | 3 Music | 4 Settings | 5..12 script slots
 void Menu::BuildPages(){
-    pages.clear(); pages.resize(5);
+    pages.clear(); pages.resize(5 + SCRIPT_SLOTS);     // 5.. = one page per script slot
     pages[0].title="16 MENU";
     pages[0].rows={ Sub("Scripts","shop_makeup_icon_a",1), Sub("Add-ons / RPF","shop_garage_icon_a",2), Sub("Music Player","shop_franklin_icon_a",3), Sub("Settings","shop_mask_icon_a",4) };
     BuildScripts(); BuildAddons(); BuildMusic();
@@ -60,16 +60,50 @@ void Menu::BuildPages(){
     { Row r; r.label="Show music widget"; r.type=RowType::Toggle; r.toggle=&music.showWidget; pages[4].rows.push_back(r); }
     { Row r; r.label="Reload config"; r.onSelect=[this]{ LoadConfig(cfg); Notify("Config reloaded"); }; pages[4].rows.push_back(r); }
 }
+static std::string FirstLine(const std::string& e, size_t max){
+    size_t n = e.find('\n'); std::string l = (n == std::string::npos) ? e : e.substr(0, n);
+    if(l.size() > max) l = l.substr(0, max); return l; }
+
 void Menu::BuildScripts(){
-    Page& p=pages[1]; p=Page(); p.title="SCRIPTS"; p.parent=0;
-    { Row r; r.label="Rescan folder"; r.onSelect=[this]{ pendingRebuild=1; Notify("Scripts rescanned"); }; p.rows.push_back(r); }
-    for(int i=0;i<(int)scripts.list.size()&&i<60;i++){ scriptOn[i]=scripts.list[i].on;
-        Row r; r.label=scripts.list[i].name; r.type=RowType::Toggle; r.toggle=&scriptOn[i];
-        r.onSelect=[this,i]{ // toggle already flipped by Input()
-            if(scriptOn[i]){ if(!scripts.Load(i,&g_host)){ scriptOn[i]=false; Notify("Script failed to load"); } else Notify("Script loaded"); }
-            else { scripts.Unload(i); Notify("Script unloaded"); } };
-        p.rows.push_back(r); }
-    if(scripts.list.empty()){ Row r; r.label="(no scripts in /data/16menu/scripts)"; p.rows.push_back(r); }
+    Page& p = pages[1]; p = Page(); p.title = "SCRIPTS"; p.parent = 0;
+    char b[64]; snprintf(b, sizeof b, "Free slots: %d / %d", scripts.FreeSlots(), (int)SCRIPT_SLOTS);
+    { Row r; r.label = b; p.rows.push_back(r); }
+    { Row r; r.label = "Refresh"; r.onSelect = [this]{ pendingRebuild = 1; Notify("Scripts refreshed"); }; p.rows.push_back(r); }
+    if(!TccAvailable()){ Row r; r.label = "(.c scripts need TinyCC: not in this build)"; p.rows.push_back(r); }
+    for(int i = 0; i < (int)scripts.list.size() && i < 60; i++){
+        ScriptEntry& e = scripts.list[i]; scriptOn[i] = e.on;
+        Row r; r.label = e.name + (e.isC ? "" : " (prx)"); r.type = RowType::Toggle; r.toggle = &scriptOn[i];
+        r.onSelect = [this, i]{                                    // the toggle was already flipped by Input()
+            if(scriptOn[i]){
+                if(scripts.Load(i, &g_host)) Notify("Script loaded");
+                else { scriptOn[i] = false; std::string m = "Error: " + FirstLine(scripts.list[i].error, 70); Notify(m.c_str()); msgFrames = 600; }
+            } else { scripts.Unload(i); Notify("Script unloaded"); }
+            pendingRebuild = 1; };
+        p.rows.push_back(r);
+        if(e.on && e.slot >= 0 && scripts.slots[e.slot].nItems > 0){ Row s2; s2.label = "    > " + e.name + " options"; s2.type = RowType::Submenu; s2.submenu = 5 + e.slot; p.rows.push_back(s2); }
+    }
+    if(scripts.list.empty()){ Row r; r.label = "(put .c scripts in /data/16menu/scripts)"; p.rows.push_back(r); }
+    BuildScriptPages();
+}
+
+// one page per slot: the rows the script registered with menu_toggle() / menu_action(), plus "Unload"
+void Menu::BuildScriptPages(){
+    for(int sl = 0; sl < SCRIPT_SLOTS; sl++){
+        Page& p = pages[5 + sl]; p = Page(); p.parent = 1;
+        ScriptSlot& s = scripts.slots[sl];
+        if(!s.used){ p.title = "SCRIPT"; Row r; r.label = "(not loaded)"; p.rows.push_back(r); continue; }
+        p.title = "SCRIPT: " + s.name;
+        for(int k = 0; k < s.nItems; k++){
+            ScriptItem* it = &s.items[k]; Row r; r.label = it->label;
+            if(it->isToggle){ r.type = RowType::Toggle; r.toggle = &it->shadow; r.onSelect = [it]{ if(it->var) *it->var = it->shadow ? 1 : 0; }; }
+            else            { r.onSelect = [it]{ if(it->cb) it->cb(); }; }
+            p.rows.push_back(r);
+        }
+        { Row r; r.label = "Unload this script"; r.onSelect = [this, sl]{
+              for(int i = 0; i < (int)scripts.list.size(); i++) if(scripts.list[i].slot == sl){ scripts.Unload(i); break; }
+              page = 1; sel = 0; scroll = 0; pendingRebuild = 1; Notify("Script unloaded"); };
+          p.rows.push_back(r); }
+    }
 }
 void Menu::BuildAddons(){
     Page& p=pages[2]; p=Page(); p.title="ADD-ONS / RPF"; p.parent=0;
@@ -245,7 +279,7 @@ void Menu::DrawWidget(){
 void Menu::Tick(){
     static bool firstTick=true; if(firstTick){ firstTick=false; ps4::Log("first Tick: the per-frame call is working"); }
     if(pendingRebuild){ if(pendingRebuild==1){ scripts.Scan(); BuildScripts(); } else if(pendingRebuild==2){ addons.Scan(); BuildAddons(); } else { music.Scan(); BuildMusic(); }
-        pendingRebuild=0; sel=0; scroll=0; }
+        pendingRebuild=0; { int n=(int)pages[page].rows.size(); if(sel>=n) sel=0; if(scroll>=n) scroll=0; } }
     static int stage=0;
     if(stage==0) ps4::Log("tick stage 1: before Input() (first game native call is inside)");
     Input();
