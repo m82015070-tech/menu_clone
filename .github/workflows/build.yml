@@ -35,6 +35,11 @@ jobs:
       - name: Get official plugin repo (for the real template + Makefile)
         run: git clone --depth 1 --recurse-submodules https://github.com/GoldHEN/GoldHEN_Plugins_Repository $HOME/repo
 
+      - name: Get TinyCC (C-script compiler, optional)
+        run: |
+          git clone --depth 1 https://repo.or.cz/tinycc.git $HOME/tinycc || git clone --depth 1 https://github.com/TinyCC/tinycc.git $HOME/tinycc || echo "WARNING: could not download TinyCC"
+          ls $HOME/tinycc 2>/dev/null | head -60
+
       - name: Compiler and linker helpers
         run: |
           # clang++ wrapper: our C++ must not need the C++ runtime library (the plugin links Sony libc only)
@@ -62,15 +67,34 @@ jobs:
           cp $GITHUB_WORKSPACE/*.cpp $GITHUB_WORKSPACE/*.h $D/source/
           curl -L -o $D/source/dr_mp3.h https://raw.githubusercontent.com/mackron/dr_libs/master/dr_mp3.h
           sed -i 's/plugin_template/menu_clone/g' $D/Makefile
+          bash $GITHUB_WORKSPACE/prepare_tcc.sh $HOME/tinycc $D/source $HOME/tcc_files.list || echo "prepare_tcc failed"
           mkdir -p $HOME/repo/bin/plugins/elf_final $HOME/repo/bin/plugins/prx_final
           echo "=== Makefile used ==="; cat $D/Makefile
 
       - name: Build
         run: |
-          cd $HOME/repo/plugin_src/menu_clone
+          D=$HOME/repo/plugin_src/menu_clone
+          cd $D
           # libc++ headers (string, vector ...) live in the toolchain; the template Makefile does not point to them
           export CPLUS_INCLUDE_PATH="$OO_PS4_TOOLCHAIN/include/c++/v1"
-          make -k 2>&1 | tee $HOME/build.log; test ${PIPESTATUS[0]} -eq 0
+          mkdir -p $GITHUB_WORKSPACE/out
+          set +e
+          make -k 2>&1 | tee $HOME/build_with_tinycc.log
+          R=${PIPESTATUS[0]}
+          if [ $R -ne 0 ] && grep -q "define HAVE_TCC" source/have_tcc.h; then
+            echo "=================================================================="
+            echo "Build WITH TinyCC failed. Rebuilding WITHOUT it (C scripts disabled)."
+            echo "=================================================================="
+            cp $HOME/build_with_tinycc.log $GITHUB_WORKSPACE/out/tinycc_build_FAILED.log
+            xargs -a $HOME/tcc_files.list rm -f
+            echo "" > source/have_tcc.h
+            rm -rf build
+            make -k 2>&1 | tee $HOME/build_without_tinycc.log
+            R=${PIPESTATUS[0]}
+          else
+            cp $HOME/build_with_tinycc.log $GITHUB_WORKSPACE/out/build.log
+          fi
+          exit $R
 
       - name: Collect result
         if: always()
@@ -78,7 +102,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/out
           find $HOME/repo/bin -type f -exec cp {} $GITHUB_WORKSPACE/out/ \;
           cd $GITHUB_WORKSPACE/out
-          for f in *; do [ -f "$f" ] || continue; case "$f" in *.prx|*.elf|*.sprx) ;; *) mv "$f" "$f.prx" ;; esac; done
+          for f in *; do [ -f "$f" ] || continue; case "$f" in *.prx|*.elf|*.sprx|*.log) ;; *) mv "$f" "$f.prx" ;; esac; done
           ls -la
 
       - uses: actions/upload-artifact@v4
@@ -86,31 +110,4 @@ jobs:
         with:
           name: menu_clone_prx
           path: out/*
-          if-no-files-found: warn
-
-      - name: Dump SDK info
-        if: always()
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/info
-          {
-            echo "=== GOLDHEN SDK include dir"; ls -la $GOLDHEN_SDK/include
-            echo; echo "=== lines mentioning hook/detour/mprotect/patch"
-            grep -rniE "hook|detour|mprotect|patch|jailbreak|kexec" $GOLDHEN_SDK/include | head -150
-            for f in $GOLDHEN_SDK/include/*.h; do echo; echo "=== FILE $f"; cat "$f"; done
-            echo; echo "=== SDK SOURCES (Detour / Patcher / Syscall)"
-            find $GOLDHEN_SDK -maxdepth 3 \( -name "*.c" -o -name "*.cpp" -o -name "*.s" -o -name "*.S" \) | head -20
-            for f in $(find $GOLDHEN_SDK -maxdepth 3 \( -name "Detour*" -o -name "Patcher*" -o -name "Syscall*" \) -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.s" -o -name "*.S" \)); do echo "=== FILE $f"; cat "$f"; done
-            echo; echo "=== plugin_template sources"
-            for f in $HOME/repo/plugin_src/plugin_template/source/*; do echo "=== FILE $f"; cat "$f"; done
-            echo; echo "=== common"; ls -la $HOME/repo/common
-            cat $HOME/repo/common/plugin_common.h
-            echo; echo "=== another plugin that hooks (game_patch/afr)"; ls $HOME/repo/plugin_src
-          } 2>&1 | head -c 600000 > $GITHUB_WORKSPACE/info/sdk_info.txt
-          ls -la $GITHUB_WORKSPACE/info
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: sdk_info
-          path: info/sdk_info.txt
           if-no-files-found: warn
